@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+acceso.db
+registros/
+modelos/
+prueba.jpg

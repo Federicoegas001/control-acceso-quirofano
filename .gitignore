@@ -1,0 +1,18 @@
+# Credenciales locales (Wi-Fi e IP del servidor)
+esp32/control_acceso/secrets.h
+
+# Entorno virtual y caches de Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Datos biometricos e historial: no se versionan
+backend/acceso.db
+backend/registros/
+
+# Modelos de reconocimiento (se descargan solos al iniciar el servidor)
+backend/modelos/
+
+# Archivos de prueba y del sistema
+backend/prueba.jpg
+.DS_Store
