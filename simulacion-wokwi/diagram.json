@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "author": "Grupo control de acceso quirofano",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pir-motion-sensor",
+      "id": "pir",
+      "top": -120,
+      "left": 230,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 120,
+      "left": 230,
+      "rotate": 0,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledv",
+      "top": 70,
+      "left": 330,
+      "attrs": {
+        "color": "green"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": 170,
+      "left": 230,
+      "rotate": 0,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledr",
+      "top": 120,
+      "left": 390,
+      "attrs": {
+        "color": "red"
+      }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buz",
+      "top": 220,
+      "left": 300,
+      "attrs": {
+        "volume": "0.2"
+      }
+    },
+    {
+      "type": "wokwi-relay-module",
+      "id": "rele",
+      "top": -10,
+      "left": -230,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-slide-switch",
+      "id": "sw",
+      "top": 260,
+      "left": -120,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "pir:VCC",
+      "esp:5V",
+      "red",
+      []
+    ],
+    [
+      "pir:GND",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "pir:OUT",
+      "esp:13",
+      "green",
+      []
+    ],
+    [
+      "esp:14",
+      "r1:1",
+      "blue",
+      []
+    ],
+    [
+      "r1:2",
+      "ledv:A",
+      "blue",
+      []
+    ],
+    [
+      "ledv:C",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "esp:15",
+      "r2:1",
+      "blue",
+      []
+    ],
+    [
+      "r2:2",
+      "ledr:A",
+      "blue",
+      []
+    ],
+    [
+      "ledr:C",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "esp:2",
+      "buz:2",
+      "blue",
+      []
+    ],
+    [
+      "buz:1",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "rele:VCC",
+      "esp:5V",
+      "red",
+      []
+    ],
+    [
+      "rele:GND",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "rele:IN",
+      "esp:RX",
+      "purple",
+      []
+    ],
+    [
+      "sw:1",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "sw:2",
+      "esp:27",
+      "orange",
+      []
+    ],
+    [
+      "sw:3",
+      "esp:3V3",
+      "red",
+      []
+    ]
+  ],
+  "dependencies": {}
+}

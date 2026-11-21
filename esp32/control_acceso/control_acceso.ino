@@ -10,7 +10,25 @@ const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 const char *serverUrl = SERVER_URL;
 
-const unsigned long INTERVALO_MS = 10000;
+// Tiempo minimo entre dos fotos mientras el sensor sigue detectando a alguien
+const unsigned long INTERVALO_MS = 4000;
+
+// ====== Actuadores ======
+// Pines libres del ESP32-CAM (no usar IO12, IO16 ni IO4)
+// El rele va en U0R (GPIO3, el RX del puerto serie): en la protoboard no se usa
+// para programar. Hay que desconectarlo para subir firmware desde la base.
+#define PIN_RELE 3
+#define PIN_SENSOR 13  // salida OUT del sensor de movimiento HC-SR501
+#define PIN_LED_VERDE 14
+#define PIN_LED_ROJO 15
+#define PIN_BUZZER 2
+
+// La mayoria de los modulos rele se activan con LOW. Si el tuyo hace "clic"
+// al reves (activo cuando deberia estar apagado), cambiar a false.
+const bool RELE_ACTIVO_EN_BAJO = true;
+
+const unsigned long TIEMPO_PUERTA_MS = 3000;   // cuanto queda abierta la "cerradura"
+const unsigned long TIEMPO_ALARMA_MS = 1000;   // cuanto suena el buzzer si se deniega
 
 // Pines de la camara en la placa AI Thinker ESP32-CAM
 #define PWDN_GPIO_NUM 32
@@ -29,6 +47,89 @@ const unsigned long INTERVALO_MS = 10000;
 #define VSYNC_GPIO_NUM 25
 #define HREF_GPIO_NUM 23
 #define PCLK_GPIO_NUM 22
+
+void rele(bool activo) {
+  bool nivel = RELE_ACTIVO_EN_BAJO ? !activo : activo;
+  digitalWrite(PIN_RELE, nivel ? HIGH : LOW);
+}
+
+void apagarTodo() {
+  digitalWrite(PIN_LED_VERDE, LOW);
+  digitalWrite(PIN_LED_ROJO, LOW);
+  digitalWrite(PIN_BUZZER, LOW);
+  rele(false);
+}
+
+void iniciarActuadores() {
+  pinMode(PIN_SENSOR, INPUT);
+  rele(false);  // se fija el nivel antes de configurar el pin para que no haga clic al arrancar
+  pinMode(PIN_RELE, OUTPUT);
+  pinMode(PIN_LED_VERDE, OUTPUT);
+  pinMode(PIN_LED_ROJO, OUTPUT);
+  pinMode(PIN_BUZZER, OUTPUT);
+  apagarTodo();
+}
+
+// Autoprueba al arrancar: prende cada componente de a uno para verificar el cableado
+void autoprueba() {
+  Serial.println("Autoprueba: LED verde");
+  digitalWrite(PIN_LED_VERDE, HIGH); delay(600); digitalWrite(PIN_LED_VERDE, LOW);
+  Serial.println("Autoprueba: LED rojo");
+  digitalWrite(PIN_LED_ROJO, HIGH); delay(600); digitalWrite(PIN_LED_ROJO, LOW);
+  Serial.println("Autoprueba: buzzer");
+  digitalWrite(PIN_BUZZER, HIGH); delay(200); digitalWrite(PIN_BUZZER, LOW);
+  Serial.println("Autoprueba: rele");
+  rele(true); delay(600); rele(false);
+}
+
+void accesoPermitido() {
+  Serial.println(">> ACCESO PERMITIDO");
+  digitalWrite(PIN_LED_VERDE, HIGH);
+  rele(true);
+  delay(TIEMPO_PUERTA_MS);
+  apagarTodo();
+}
+
+void accesoDenegado() {
+  Serial.println(">> ACCESO DENEGADO");
+  digitalWrite(PIN_LED_ROJO, HIGH);
+  digitalWrite(PIN_BUZZER, HIGH);
+  delay(TIEMPO_ALARMA_MS);
+  apagarTodo();
+}
+
+// Parpadeo corto: el servidor guardo un rostro durante un registro
+void senalRegistro() {
+  for (int i = 0; i < 2; i++) {
+    digitalWrite(PIN_LED_VERDE, HIGH); delay(150);
+    digitalWrite(PIN_LED_VERDE, LOW); delay(150);
+  }
+}
+
+// Tres parpadeos rojos rapidos: no se pudo hablar con el servidor
+void senalErrorServidor() {
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(PIN_LED_ROJO, HIGH); delay(100);
+    digitalWrite(PIN_LED_ROJO, LOW); delay(100);
+  }
+}
+
+// Decide que hacer segun la respuesta JSON del servidor
+void actuar(String cuerpo) {
+  cuerpo.replace(" ", "");
+  cuerpo.replace("\n", "");
+
+  if (cuerpo.indexOf("\"authorized\":true") >= 0) {
+    accesoPermitido();
+  } else if (cuerpo.indexOf("\"motivo\":\"desconocido\"") >= 0 ||
+             cuerpo.indexOf("\"motivo\":\"sin_permiso\"") >= 0) {
+    // Solo se alarma si hay una persona frente a la camara que no esta autorizada.
+    // Si no hay nadie (sin_rostro) no se hace nada.
+    accesoDenegado();
+  } else if (cuerpo.indexOf("\"motivo\":\"rostro_guardado\"") >= 0) {
+    senalRegistro();
+  }
+}
 
 bool iniciarCamara() {
   camera_config_t config = {};
@@ -111,15 +212,20 @@ void capturarYEnviar() {
   http.addHeader("Content-Type", "image/jpeg");
   int codigo = http.POST(fb->buf, fb->len);
 
+  // La foto ya se envio: se libera el buffer antes de actuar
+  esp_camera_fb_return(fb);
+
   if (codigo > 0) {
+    String cuerpo = http.getString();
     Serial.printf("Respuesta HTTP %d: ", codigo);
-    Serial.println(http.getString());
+    Serial.println(cuerpo);
+    http.end();
+    if (codigo == 200) actuar(cuerpo);
   } else {
     Serial.printf("Error de conexion: %s\n", http.errorToString(codigo).c_str());
+    http.end();
+    senalErrorServidor();
   }
-
-  http.end();
-  esp_camera_fb_return(fb);
 }
 
 void setup() {
@@ -127,17 +233,31 @@ void setup() {
   Serial.println();
   Serial.printf("PSRAM detectada: %s\n", psramFound() ? "si" : "no");
 
+  iniciarActuadores();
+  autoprueba();
+
   if (!iniciarCamara()) {
     Serial.println("Sistema detenido: revisar la camara.");
+    // LED rojo fijo: falla de camara
+    digitalWrite(PIN_LED_ROJO, HIGH);
     while (true) delay(1000);
   }
   conectarWifi();
 }
 
+unsigned long ultimaFoto = 0;
+
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     conectarWifi();
   }
-  capturarYEnviar();
-  delay(INTERVALO_MS);
+
+  // Solo se saca la foto cuando el sensor detecta movimiento
+  bool hayAlguien = digitalRead(PIN_SENSOR) == HIGH;
+  if (hayAlguien && (ultimaFoto == 0 || millis() - ultimaFoto >= INTERVALO_MS)) {
+    Serial.println("Movimiento detectado");
+    capturarYEnviar();
+    ultimaFoto = millis();
+  }
+  delay(100);
 }
