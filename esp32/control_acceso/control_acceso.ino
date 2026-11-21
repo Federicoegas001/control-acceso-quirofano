@@ -13,6 +13,11 @@ const char *serverUrl = SERVER_URL;
 // Tiempo minimo entre dos fotos mientras el sensor sigue detectando a alguien
 const unsigned long INTERVALO_MS = 4000;
 
+// Modo prueba: saca una foto cada INTERVALO_MS sin esperar al sensor.
+// Sirve para probar en la base programadora, donde el sensor no se puede conectar.
+// En la protoboard con el sensor conectado, poner en false.
+const bool MODO_PRUEBA_SIN_SENSOR = true;
+
 // ====== Actuadores ======
 // Pines libres del ESP32-CAM (no usar IO12, IO16 ni IO4)
 // El rele va en U0R (GPIO3, el RX del puerto serie): en la protoboard no se usa
@@ -49,6 +54,9 @@ const unsigned long TIEMPO_ALARMA_MS = 1000;   // cuanto suena el buzzer si se d
 #define PCLK_GPIO_NUM 22
 
 void rele(bool activo) {
+  // En modo prueba (placa en la base) el rele no esta conectado: no se toca su pin,
+  // asi el monitor serie (que usa el mismo pin) sigue funcionando.
+  if (MODO_PRUEBA_SIN_SENSOR) return;
   bool nivel = RELE_ACTIVO_EN_BAJO ? !activo : activo;
   digitalWrite(PIN_RELE, nivel ? HIGH : LOW);
 }
@@ -63,7 +71,7 @@ void apagarTodo() {
 void iniciarActuadores() {
   pinMode(PIN_SENSOR, INPUT);
   rele(false);  // se fija el nivel antes de configurar el pin para que no haga clic al arrancar
-  pinMode(PIN_RELE, OUTPUT);
+  if (!MODO_PRUEBA_SIN_SENSOR) pinMode(PIN_RELE, OUTPUT);
   pinMode(PIN_LED_VERDE, OUTPUT);
   pinMode(PIN_LED_ROJO, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT);
@@ -181,17 +189,43 @@ bool iniciarCamara() {
   return true;
 }
 
+// Diagnostico: lista las redes que ve el ESP32 y su intensidad de senal (RSSI).
+// Cerca de -50 dBm es muy buena, -70 dBm aceptable, -80 dBm o menos es muy debil.
+void escanearRedes() {
+  Serial.println("Buscando redes Wi-Fi...");
+  int n = WiFi.scanNetworks();
+  bool encontrada = false;
+  for (int i = 0; i < n; i++) {
+    Serial.printf("  %-24s %4d dBm  canal %d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+    if (WiFi.SSID(i) == ssid) encontrada = true;
+  }
+  if (!encontrada) Serial.printf("La red \"%s\" NO aparece (fuera de alcance o es de 5 GHz)\n", ssid);
+  WiFi.scanDelete();
+}
+
 void conectarWifi() {
-  WiFi.begin(ssid, password);
+  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  Serial.print("Conectando al WiFi");
+  escanearRedes();
+  Serial.printf("Conectando al WiFi \"%s\"...\n", ssid);
+  WiFi.begin(ssid, password);
+  unsigned long inicio = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    // Cada 15 s informa el estado y reintenta desde cero
+    if (millis() - inicio > 15000) {
+      Serial.printf("WiFi sin conectar (estado %d). Reintentando...\n", WiFi.status());
+      WiFi.disconnect(true);
+      delay(1000);
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(ssid, password);
+      inicio = millis();
+    }
   }
-  Serial.println();
   Serial.print("Conectado. IP del ESP32: ");
   Serial.println(WiFi.localIP());
+  Serial.print("Servidor: ");
+  Serial.println(serverUrl);
 }
 
 void capturarYEnviar() {
@@ -236,12 +270,14 @@ void setup() {
   iniciarActuadores();
   autoprueba();
 
+  Serial.println("Iniciando camara...");
   if (!iniciarCamara()) {
     Serial.println("Sistema detenido: revisar la camara.");
     // LED rojo fijo: falla de camara
     digitalWrite(PIN_LED_ROJO, HIGH);
     while (true) delay(1000);
   }
+  Serial.println("Camara OK");
   conectarWifi();
 }
 
@@ -253,7 +289,7 @@ void loop() {
   }
 
   // Solo se saca la foto cuando el sensor detecta movimiento
-  bool hayAlguien = digitalRead(PIN_SENSOR) == HIGH;
+  bool hayAlguien = MODO_PRUEBA_SIN_SENSOR || digitalRead(PIN_SENSOR) == HIGH;
   if (hayAlguien && (ultimaFoto == 0 || millis() - ultimaFoto >= INTERVALO_MS)) {
     Serial.println("Movimiento detectado");
     capturarYEnviar();
